@@ -1,0 +1,45 @@
+{
+  "id": "<POLICY_OBJECT_ID>",
+  "templateId": null,
+  "displayName": "CA001 - Require MFA for admins",
+  "createdDateTime": "2026-08-24T07:13:36.7070959Z",
+  "modifiedDateTime": "2026-08-24T08:32:47.9965438Z",
+  "state": "enabledForReportingButNotEnforced",
+  "sessionControls": null,
+  "conditions": {
+    "userRiskLevels": [],
+    "signInRiskLevels": [],
+    "clientAppTypes": ["all"],
+    "platforms": null,
+    "locations": null,
+    "times": null,
+    "deviceStates": null,
+    "devices": null,
+    "clientApplications": null,
+    "agents": null,
+    "applications": {
+      "includeApplications": ["All"],
+      "excludeApplications": [],
+      "includeUserActions": [],
+      "includeAuthenticationContextClassReferences": [],
+      "applicationFilter": null
+    },
+    "users": {
+      "includeUsers": [],
+      "excludeUsers": [],
+      "includeGroups": [],
+      "excludeGroups": [],
+      "includeRoles": ["fe930be7-5e62-47db-91af-98c3a49a38b1"],
+      "excludeRoles": ["62e90394-69f5-4237-9190-012177145e10"],
+      "includeGuestsOrExternalUsers": null,
+      "excludeGuestsOrExternalUsers": null
+    }
+  },
+  "grantControls": {
+    "operator": "OR",
+    "builtInControls": ["mfa"],
+    "customAuthenticationFactors": [],
+    "termsOfUse": [],
+    "authenticationStrength": null
+  }
+}
