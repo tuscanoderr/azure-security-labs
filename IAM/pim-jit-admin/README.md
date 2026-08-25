@@ -77,19 +77,19 @@ justification, approval, and a shortened activation window.
 tenant/object IDs are blurred.*
 
 **Before — standing privilege (Active / Permanent)**
-![User Administrator held as a permanent active assignment](01-before-active-permanent.png)
+![User Administrator held as a permanent active assignment](images/01-before-active-permanent.png)
 
 **After — converted to eligible (just-in-time)**
-![User Administrator now under Eligible assignments](02-after-eligible.png)
+![User Administrator now under Eligible assignments](images/02-after-eligible.png)
 
 **Activation policy — MFA, justification, approval, 4-hour max**
-![Role activation settings](03-activation-settings.png)
+![Role activation settings](images/03-activation-settings.png)
 
 **Just-in-time activation request with justification (as the eligible user)**
-![Activating the role with a 4-hour duration and justification](04-activation-request.png)
+![Activating the role with a 4-hour duration and justification](images/04-activation-request.png)
 
 **Approval of the activation request (as the approver), showing the 4-hour window**
-![Approver granting the activation with a reason and time-boxed window](05-approval.png)
+![Approver granting the activation with a reason and time-boxed window](images/05-approval.png)
 
 ## SC-500 concepts demonstrated
 
