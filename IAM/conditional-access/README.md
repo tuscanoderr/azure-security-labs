@@ -85,13 +85,16 @@ verify the saved state rather than trusting the editor blades alone.
 
 ## Evidence
 
-*(Screenshots redacted — domain names and object IDs removed.)*
+*No sensitive identifiers appear in these captures (lab personas; Office 365's public app ID).*
 
-- `images/01-policy-report-only.png` — policy summary: state = report-only, 1 role
-  included, 1 role excluded, require MFA.
-- `images/02-whatif-admin.png` — What-If for the User Administrator: CA001 applies,
-  control = require MFA.
-- `images/03-whatif-nonadmin.png` — What-If for a Reader account: no policies apply,        proving role scoping..
+**Policy summary — report-only, role targeted, break-glass excluded, MFA required**
+![Policy details showing report-only state, one role included and one excluded](images/01-policy-report-only.png)
+
+**What-If: User Administrator — CA001 applies, requires MFA**
+![What-If result for the admin: CA001 applies with require MFA](images/02-whatif-admin.png)
+
+**What-If: Reader — no policies apply, confirming role scoping**
+![What-If result for a non-admin: no policies apply](images/03-whatif-nonadmin.png)
 
 ## Policy definition (redacted)
 
