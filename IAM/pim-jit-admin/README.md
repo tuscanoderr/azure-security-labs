@@ -2,11 +2,11 @@
 
 > Remove standing administrative privilege by converting a permanent role assignment
 > into an eligible, just-in-time assignment that must be activated with MFA,
-> justification, and approval — then govern it with an access review.
+> justification, and approval, for a limited time window.
 
 **Domain:** SC-500 — Manage identity, access, and governance
 **Services:** Microsoft Entra ID Governance — Privileged Identity Management (requires Entra ID P2)
-**Status:** <e.g. Completed — role converted to eligible, activation tested, access review configured>
+**Status:** Completed — role converted to eligible, activation requested, approved, and time-boxed.
 
 ---
 
@@ -27,52 +27,54 @@ and the blast radius of a single compromised credential.
 
 | Account | Role | Part in this lab |
 |---|---|---|
-| Derrisa Tuscano | User Administrator | Converted to **eligible**; activates just-in-time |
-| PDFMerge Administrator | Global Administrator | Manages PIM and **approves** activation requests |
+| Nebula | User Administrator | Converted to **eligible**; performs the just-in-time activation |
+| PDFMerge Administrator | Global Administrator | Manages PIM and **approves** the activation request |
 | Groot / Rocket | Reader | Not used in this lab |
 
 ## What I built
 
-Converted the User Administrator role for Derrisa from a permanent active assignment to a
-time-bound eligible assignment, and configured an activation policy that enforces MFA,
-justification, approval, and a short activation window.
+Converted the User Administrator role for Nebula from a permanent active assignment to a
+time-bound eligible assignment, and configured an activation policy enforcing MFA,
+justification, approval, and a shortened activation window.
 
 | Setting | Value |
 |---|---|
 | Role | User Administrator |
 | Assignment type | **Eligible** (was: Active / Permanent) |
-| Eligibility duration | Time-bound: `<start>` – `<end>` (not permanent-eligible) |
-| Require MFA on activation | Yes |
+| Eligibility duration | Time-bound (1-year expiry) |
+| Require MFA on activation | Yes (Azure MFA) |
 | Require justification | Yes |
 | Require approval | Yes — approver: PDFMerge Administrator |
-| Max activation duration | `<e.g. 2 hours>` |
-| Notifications | On activation and approval |
+| Max activation duration | **4 hours** (reduced from the 8-hour default) |
 
 ### Design decisions (the "why")
 
 - **Eligible, not active.** The role sits dormant until needed, so a compromised account
   does not automatically hold admin rights.
-- **Time-bound eligibility.** The eligibility itself expires, so access does not linger
-  indefinitely — access should be re-justified, not assumed.
+- **Time-bound eligibility.** The eligibility itself expires, so access is re-justified
+  rather than assumed indefinitely.
 - **Approval required.** A second person (the approver) gates activation, adding a control
   against a single compromised or rogue account.
-- **Short activation window.** A 2-hour activation limits how long elevated rights exist
-  even during legitimate use.
+- **Shortened activation window.** Reducing the max activation from 8 to 4 hours limits how
+  long elevated rights exist even during legitimate use — a least-privilege refinement,
+  not a default.
 
 ## Steps
 
-1. Confirmed PIM is available (Entra ID P2) and that Derrisa has an MFA method registered.
-2. Recorded the **before** state: Derrisa's User Administrator as Active / Permanent.
-3. Added Derrisa as an **eligible** assignment for User Administrator (time-bound).
+1. Confirmed PIM is available (Entra ID P2).
+2. Recorded the **before** state: User Administrator held as Active / Permanent.
+3. Added Nebula as an **eligible** assignment for User Administrator (time-bound).
 4. **Removed** the old permanent active assignment so no standing access remained.
-5. Configured the role's **activation settings** (MFA, justification, approval, max duration).
-6. Activated the role **just-in-time** as Derrisa, providing a justification.
-7. **Approved** the activation request as PDFMerge Administrator.
-8. Configured an **access review** for the role to periodically re-certify eligibility.
+5. Configured the role's **activation settings** (MFA, justification, approval, 4-hour cap).
+6. Activated the role **just-in-time** as Nebula, providing a justification (MFA enforced,
+   including first-time Authenticator registration).
+7. **Approved** the activation request as PDFMerge Administrator, with an approval reason.
+8. Confirmed the role became active for a time-boxed 4-hour window.
 
 ## Evidence
 
-*No sensitive identifiers appear in these captures (lab personas; tenant/object IDs blurred).*
+*No sensitive identifiers appear in these captures beyond lab personas; email domains and
+tenant/object IDs are blurred.*
 
 **Before — standing privilege (Active / Permanent)**
 ![User Administrator held as a permanent active assignment](01-before-active-permanent.png)
@@ -80,33 +82,22 @@ justification, approval, and a short activation window.
 **After — converted to eligible (just-in-time)**
 ![User Administrator now under Eligible assignments](02-after-eligible.png)
 
-**Activation policy — MFA, justification, approval, max duration**
+**Activation policy — MFA, justification, approval, 4-hour max**
 ![Role activation settings](03-activation-settings.png)
 
-**Just-in-time activation with justification (as the eligible user)**
-![Activating the role with a justification](04-activation-request.png)
+**Just-in-time activation request with justification (as the eligible user)**
+![Activating the role with a 4-hour duration and justification](04-activation-request.png)
 
-**Approval of the activation request (as the approver)**
-![Approver granting the activation](05-approval.png)
-
-**Access review configured for the role**
-![Access review to re-certify eligibility](06-access-review.png)
-
-## Role policy definition (optional, redacted)
-
-PIM activation rules are exportable via Microsoft Graph
-(`roleManagementPolicy` / `roleManagementPolicyAssignment`). See
-[`role-settings.json`](./role-settings.json) if included — tenant and object IDs
-placeholdered.
+**Approval of the activation request (as the approver), showing the 4-hour window**
+![Approver granting the activation with a reason and time-boxed window](05-approval.png)
 
 ## SC-500 concepts demonstrated
 
 - **Eligible vs active assignments** — the core PIM distinction.
 - **Just-in-time vs standing access** — activation replaces permanent rights.
 - **Time-bound assignments** — eligibility and activation both expire.
-- **Activation requirements** — MFA, justification, ticket info, and approval.
-- **Approval workflow** — a second party gates elevation.
-- **Access reviews** — periodic re-certification of who should stay eligible.
+- **Activation requirements** — MFA, justification, and approval enforced on activation.
+- **Approval workflow** — a second party gates elevation, with a recorded reason.
 - **PIM scope** — this lab covers Entra roles; PIM also governs Azure resource roles
   and PIM for Groups.
 - **Managing PIM** requires Global Administrator or Privileged Role Administrator.
@@ -114,11 +105,11 @@ placeholdered.
 ## How I'd extend this
 
 - Require a **ticket number** on activation for change traceability.
-- Add PIM for an **Azure resource role** (e.g. a subscription Owner/Contributor) to show
-  the resource-scope variant.
+- Add an **access review** to periodically re-certify who remains eligible.
+- Add PIM for an **Azure resource role** to show the resource-scope variant.
 - Use **PIM for Groups** to make membership of a privileged group itself just-in-time.
-- Pair with the Conditional Access lab: require **authentication strength** (phishing-
-  resistant MFA) on privileged-role activation.
+- Pair with the Conditional Access lab: require **phishing-resistant MFA (authentication
+  strength)** on privileged-role activation.
 
 ## Cleanup
 
