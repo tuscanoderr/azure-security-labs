@@ -218,9 +218,3 @@ az group exists --name lab-az-foundry     # -> false
 Deleting the resource group removes the Foundry resource, the model deployment, the guardrails, and
 the APIM (AI Gateway) instance in one operation. No subscription-scoped objects were created outside
 the resource group (unlike the AVNM lab), so no separate cleanup is required.
-
-**Cost note:** the Foundry resource, model deployment (a few test tokens), guardrails, and Azure AI
-Content Safety were negligible. The meaningful cost was **Azure API Management, Developer tier
-(~$36/mo, ~₹4/hr)**, which also took ~40 minutes to provision. Built and torn down in a single
-session, the lab cost roughly **₹15-40** of credit. APIM is the cost/time driver — provision it only
-when ready and tear it down same-session.
