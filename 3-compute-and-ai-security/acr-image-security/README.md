@@ -65,12 +65,21 @@ az acr repository delete --name acrlockd3r7 --image lab/sample:v1 --yes
 
 ## Evidence
 
-| File | Shows |
-|---|---|
-| `images/01-acr-created-admin-disabled.png` | Registry on Basic, `AdminEnabled` False, provisioning Succeeded |
-| `images/02-image-pushed.png` | Tag `v1` present in the `lab/sample` repository, placed via Entra identity |
-| `images/03-image-locked.png` | `writeEnabled` and `deleteEnabled` both false, `listEnabled` and `readEnabled` still true |
-| `images/04-delete-blocked.png` | Delete attempt refused with "The operation is disallowed on this registry, repository or image" |
+Registry created on the Basic tier with the admin account disabled and provisioning succeeded:
+
+![Registry on Basic with the admin account disabled](images/01-acr-created-admin-disabled.png)
+
+Tag `v1` present in the `lab/sample` repository, placed through Entra identity rather than a shared credential:
+
+![Tag v1 present in the lab/sample repository](images/02-image-pushed.png)
+
+The image locked, with `writeEnabled` and `deleteEnabled` both false while `listEnabled` and `readEnabled` remain true:
+
+![Image locked against write and delete](images/03-image-locked.png)
+
+The delete attempt refused by the registry with "The operation is disallowed on this registry, repository or image":
+
+![Delete attempt refused by the registry](images/04-delete-blocked.png)
 
 A useful detail visible during the run: when the registry token was not yet available, the CLI fell back to admin credentials and reported "Admin user is disabled." That confirms the shared account really is off and that access depends on Entra identity.
 
