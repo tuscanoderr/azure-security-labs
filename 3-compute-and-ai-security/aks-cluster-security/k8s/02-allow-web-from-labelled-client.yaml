@@ -1,0 +1,24 @@
+# Allow only pods labelled access=web in the client namespace to reach app=web on TCP 80.
+# namespaceSelector and podSelector sit in the same list item, so both must match (AND).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-from-labelled-client
+  namespace: demo
+spec:
+  podSelector:
+    matchLabels:
+      app: web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: client
+          podSelector:
+            matchLabels:
+              access: web
+      ports:
+        - protocol: TCP
+          port: 80

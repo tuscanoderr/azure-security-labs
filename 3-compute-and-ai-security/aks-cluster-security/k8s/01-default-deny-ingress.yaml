@@ -1,0 +1,11 @@
+# Deny all inbound traffic to every pod in the demo namespace.
+# An empty podSelector matches all pods; no ingress rules means nothing is allowed in.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress

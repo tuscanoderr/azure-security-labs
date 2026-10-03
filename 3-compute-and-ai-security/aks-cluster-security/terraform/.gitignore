@@ -1,0 +1,8 @@
+# Terraform working files: state and plans contain tenant, subscription and object IDs
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan
+*.tfplan
+crash.log
