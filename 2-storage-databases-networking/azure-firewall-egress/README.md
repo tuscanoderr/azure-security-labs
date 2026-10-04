@@ -5,23 +5,23 @@
 > only `*.ubuntu.com` at Layer 7; everything else hits the implicit deny. Proven live from a
 > spoke VM: an allowed FQDN completes its TLS handshake, a blocked FQDN is torn down mid-handshake.
 
-**Domain:** 2 — Storage, Databases & Networking (SC-500)
-**Services:** Azure Firewall (Basic), Firewall Policy, VNet peering, User-Defined Routes, Azure VM
-**Status:** Complete — evidenced and torn down
+**Domain:** 2 (Storage, Databases & Networking, SC-500)
+**Services:** Azure Firewall (Basic), Firewall Policy, VNet peering, User-Defined Routes, Azure VM, Terraform
+**Status:** Complete (evidenced and torn down)
 
 ---
 
 ## Objective
 
 Demonstrate centralized, identity-agnostic **egress control** for a workload subnet using Azure
-Firewall in a hub-spoke topology — specifically the Layer-7 **FQDN filtering** that an NSG cannot
-perform — and prove it works with a live allow-vs-deny traffic test.
+Firewall in a hub-spoke topology. The focus is the Layer-7 **FQDN filtering** that an NSG cannot
+perform, proven to work with a live allow-vs-deny traffic test.
 
 ## The problem (insecure default)
 
 By default, a subnet's `0.0.0.0/0` route points at Azure's internet gateway: any VM can reach
 **any** destination on the internet, unfiltered. NSGs can restrict this only by IP address and
-port (Layer 3-4) — they have no concept of *which FQDN* a packet is bound for, so "allow the
+port (Layer 3-4). They have no concept of *which FQDN* a packet is bound for, so "allow the
 Ubuntu repos but nothing else" is impossible with an NSG alone. The result is an unbounded egress
 surface: a compromised or misconfigured workload can exfiltrate to, or pull payloads from, any
 host on the internet.
@@ -31,14 +31,14 @@ host on the internet.
 | Item | Value |
 |---|---|
 | Resource group | `lab-az-fw` (dedicated, East US) |
-| Hub VNet | `vnet-hub` — `10.30.0.0/16` |
-| Firewall data subnet | `AzureFirewallSubnet` — `10.30.0.0/26` |
-| Firewall management subnet | `AzureFirewallManagementSubnet` — `10.30.0.64/26` |
-| Spoke VNet | `vnet-spoke` — `10.31.0.0/16` |
-| Workload subnet | `snet-workload` — `10.31.1.0/24` |
-| Firewall | `fw-hub` — Azure Firewall **Basic**, non-zonal, private IP `10.30.0.4` |
+| Hub VNet | `vnet-hub`, `10.30.0.0/16` |
+| Firewall data subnet | `AzureFirewallSubnet`, `10.30.0.0/26` |
+| Firewall management subnet | `AzureFirewallManagementSubnet`, `10.30.0.64/26` |
+| Spoke VNet | `vnet-spoke`, `10.31.0.0/16` |
+| Workload subnet | `snet-workload`, `10.31.1.0/24` |
+| Firewall | `fw-hub`: Azure Firewall **Basic**, non-zonal, private IP `10.30.0.4` |
 | Firewall policy | `fw-hub-policy` (Basic) |
-| Test VM | `vm-spoke` — `Standard_D2als_v7`, Ubuntu 22.04, private IP `10.31.1.4`, no public IP |
+| Test VM | `vm-spoke`: `Standard_D2als_v7`, Ubuntu 22.04, private IP `10.31.1.4`, no public IP |
 
 ## What I built
 
@@ -61,28 +61,28 @@ all other egress is denied by default.
 ### Design decisions (the "why")
 
 - **Dedicated resource group `lab-az-fw`.** Kept the whole lab out of `lab-az-pim`, whose
-  `allowed-locations-eastus` Azure Policy would `Deny` resources — the same cross-domain
+  `allowed-locations-eastus` Azure Policy would `Deny` resources. This is the same cross-domain
   constraint that shaped the `azure-sql-security` lab. (Policy Deny ignores identity, so even an
-  Owner can't override it — see the `azure-policy-allowed-locations` lab.)
+  Owner can't override it; see the `azure-policy-allowed-locations` lab.)
 - **Basic tier, non-zonal.** Basic is the low-cost tier for a lab. Its public IPs were created
-  non-zonal, so the firewall had to be created non-zonal to match — Azure requires the firewall
+  non-zonal, so the firewall had to be created non-zonal to match. Azure requires the firewall
   and its public IPs to share the same availability-zone configuration, and the portal wizard
   (which forces zone-redundant) can't express a non-zonal build; the CLI can.
 - **Two subnets + two public IPs.** Firewall **Basic** requires a dedicated
   `AzureFirewallManagementSubnet` and a separate management public IP in addition to the data
-  plane — the management NIC carries Microsoft's out-of-band control traffic. Standard/Premium
+  plane. The management NIC carries Microsoft's out-of-band control traffic. Standard/Premium
   hide this by default; Basic mandates it.
 - **DNS allowed as a *network* rule.** Application rules filter on FQDN, but the VM must first
-  resolve that FQDN — a UDP/53 flow that an application rule won't carry. Without an explicit DNS
-  network rule, forced-tunnelled resolution fails and every application rule silently appears
-  broken.
+  resolve that FQDN, and that is a UDP/53 flow an application rule won't carry. Without an
+  explicit DNS network rule, forced-tunnelled resolution fails and every application rule
+  silently appears broken.
 - **UDR applied to the spoke subnet only, never `AzureFirewallSubnet`.** Applying a
   `0.0.0.0/0 → firewall` route to the firewall's own subnet would loop its egress back to itself.
   The route table is bound to `snet-workload` alone.
 - **Test VM with no public IP and no NSG.** No public IP keeps the test purely about *egress*;
   no NSG ensures the only thing filtering traffic is the firewall, so an observed deny can only
-  be attributed to it. The VM is driven via `az vm run-command` over the control plane — no
-  inbound access needed.
+  be attributed to it. The VM is driven via `az vm run-command` over the control plane, so no
+  inbound access is needed.
 
 ## Steps & output
 
@@ -97,14 +97,14 @@ az network vnet peering create -g lab-az-fw -n hub-to-spoke --vnet-name vnet-hub
 az network vnet peering create -g lab-az-fw -n spoke-to-hub --vnet-name vnet-spoke --remote-vnet vnet-hub --allow-vnet-access --allow-forwarded-traffic
 ```
 
-Public IPs (both Standard/Static — Basic firewall rejects Basic/Dynamic IPs):
+Public IPs (both Standard/Static, because the Basic firewall rejects Basic/Dynamic IPs):
 
 ```
 az network public-ip create -g lab-az-fw -n pip-fw-data --sku Standard --allocation-method Static
 az network public-ip create -g lab-az-fw -n pip-fw-mgmt --sku Standard --allocation-method Static
 ```
 
-Firewall (Basic, non-zonal, both IP configs supplied together — the data-traffic group
+Firewall (Basic, non-zonal, both IP configs supplied together: the data-traffic group
 `--conf-name`/`--public-ip`/`--vnet-name` plus the management group `--m-conf-name`/`--m-public-ip`):
 
 ```
@@ -146,35 +146,82 @@ curl -v -m 20 https://www.microsoft.com
 # curl: (35)   <-- firewall reset the session; no allow rule matched
 ```
 
-DNS resolved in **both** cases (name -> IP succeeded); the difference is purely the firewall's
-L7 decision on the FQDN. Same VM, same route, same DNS — only the target FQDN differs.
+DNS resolved in **both** cases (name -> IP succeeded). The difference is purely the firewall's
+L7 decision on the FQDN. Same VM, same route, same DNS; only the target FQDN differs.
+
+## Built as code
+
+The lab was first built with the Azure CLI as documented above. The same end state is now
+reproducible from [`terraform/main.tf`](terraform/main.tf) (azurerm 4.x), which passes
+`terraform validate`. The evidence images below come from the original CLI build.
+
+```
+cd terraform
+$env:ARM_SUBSCRIPTION_ID = az account show --query id -o tsv
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+```
+
+| Lab piece | Terraform resource |
+|---|---|
+| Resource group `lab-az-fw` | `azurerm_resource_group` |
+| `vnet-hub`, `vnet-spoke` | `azurerm_virtual_network` |
+| `AzureFirewallSubnet`, `AzureFirewallManagementSubnet`, `snet-workload` | `azurerm_subnet` |
+| Peerings `hub-to-spoke` and `spoke-to-hub` | `azurerm_virtual_network_peering` |
+| Public IPs `pip-fw-data`, `pip-fw-mgmt` | `azurerm_public_ip` |
+| Policy `fw-hub-policy` | `azurerm_firewall_policy` |
+| `rcg-egress` with `app-allow` and `net-allow` | `azurerm_firewall_policy_rule_collection_group` |
+| Firewall `fw-hub` with data and management IP configs | `azurerm_firewall` |
+| Route table `rt-spoke` with route `to-firewall` | `azurerm_route_table` |
+| `rt-spoke` bound to `snet-workload` | `azurerm_subnet_route_table_association` |
+| VM NIC `vm-spoke-nic` | `azurerm_network_interface` |
+| SSH key for the VM | `tls_private_key` |
+| Test VM `vm-spoke` | `azurerm_linux_virtual_machine` |
+
+Differences from the CLI build:
+
+- The firewall, its two IP configurations and the policy association are created in one
+  resource, so the separate `az network firewall update --firewall-policy` step disappears.
+- The route's next hop reads the firewall's private IP from the firewall resource instead of
+  hard coding `10.30.0.4`.
+- The test VM depends on the route table association, so its first boot already egresses
+  through the firewall.
+- The VM NIC is named `vm-spoke-nic`. The VM's SSH key is generated by Terraform and kept only
+  in local state.
+- The VM size is a variable (`vm_size`, default `Standard_D2als_v7`).
+- The allow and deny proof still runs through `az vm run-command` with curl, as in Steps.
+
+State, plans and logs stay on the local machine and are excluded by
+[`terraform/.gitignore`](terraform/.gitignore).
 
 ## Evidence
 
 *No sensitive identifiers appear in these images (subscription/tenant/object IDs, UPNs, and public
 IP addresses are redacted or cropped out).*
 
-**01 — Hub and spoke VNets peered both directions (`Connected` / `FullyInSync`)**
+**01: Hub and spoke VNets peered both directions (`Connected` / `FullyInSync`)**
 ![Hub-to-spoke and spoke-to-hub VNet peering both showing Connected](images/01-vnet-peering-connected.png)
 
-**02 — Azure Firewall Basic: dual IP configuration (data + management planes), private IP 10.30.0.4**
+**02: Azure Firewall Basic, dual IP configuration (data + management planes), private IP 10.30.0.4**
 ![Firewall create screen showing Basic tier and the mandatory management NIC/public IP](images/02-firewall-basic-dual-ip.png)
 
-**03 — Application rule: `app-allow` / `allow-ubuntu` filtering on FQDN `*.ubuntu.com` (Layer 7)**
+**03: Application rule `app-allow` / `allow-ubuntu` filtering on FQDN `*.ubuntu.com` (Layer 7)**
 ![Application rules blade showing the allow-ubuntu FQDN rule in rcg-egress](images/03-policy-application-rules.png)
 
-**04 — Network rule: `net-allow` / `allow-dns` permitting UDP 53 to Azure DNS (so FQDN resolution works)**
+**04: Network rule `net-allow` / `allow-dns` permitting UDP 53 to Azure DNS (so FQDN resolution works)**
 ![Network rules blade showing the allow-dns rule in rcg-egress](images/04-policy-network-rules.png)
 
-**05 — Forced-tunnel UDR: `0.0.0.0/0` -> VirtualAppliance `10.30.0.4`, bound to snet-workload**
+**05: Forced-tunnel UDR, `0.0.0.0/0` -> VirtualAppliance `10.30.0.4`, bound to snet-workload**
 ![Route table rt-spoke default route to the firewall private IP](images/05-udr-forced-tunnel.png)
 
-**06 — Live proof: allowed FQDN returns HTTP 200; blocked FQDN returns no response (HTTP 000)**
+**06: Live proof. The allowed FQDN returns HTTP 200; the blocked FQDN returns no response (HTTP 000)**
 ![Two curl tests from vm-spoke via run-command: ubuntu returns 200, microsoft is blocked](images/06-allow-deny-traffic-proof.png)
 
 ## Configuration & identifiers (redacted)
 
-This lab was built entirely via Azure CLI. All resource IDs in raw output contain the
+This lab was built entirely via Azure CLI. The full build definition is also captured in
+[`terraform/main.tf`](terraform/main.tf). All resource IDs in raw output contain the
 subscription ID, which is redacted as `<SUBSCRIPTION_ID>` wherever shown. Public IP *names*
 (`pip-fw-data`, `pip-fw-mgmt`) are safe; their assigned public addresses are masked in
 screenshots. Private addresses (`10.30.x` / `10.31.x`) and Azure's fixed platform DNS IP
@@ -183,7 +230,7 @@ screenshots. Private addresses (`10.30.x` / `10.31.x`) and Azure's fixed platfor
 ## SC-500 concepts demonstrated
 
 - **L7 FQDN filtering vs. L3-4 NSG filtering.** The firewall allows/denies by *fully qualified
-  domain name* — a capability NSGs (IP/port only) do not have. Directly completes the
+  domain name*, a capability NSGs (IP/port only) do not have. Directly completes the
   `network-segmentation` lab, which proved NSG/ASG L3-4 control with Network Watcher.
 - **Hub-spoke topology.** Centralized security infrastructure in a hub, workloads in peered
   spokes routing egress through it.
@@ -191,7 +238,7 @@ screenshots. Private addresses (`10.30.x` / `10.31.x`) and Azure's fixed platfor
   (DNAT/Network/Application) -> rules; type-ordering (DNAT, then Network, then Application) is
   fixed regardless of priority numbers.
 - **Forced tunneling with UDRs.** A `0.0.0.0/0` User-Defined Route redirects subnet egress to a
-  network virtual appliance (the firewall) — the mechanism that makes the rules enforce.
+  network virtual appliance (the firewall). That is the mechanism that makes the rules enforce.
 - **Default-deny egress posture.** Explicit allow-list (DNS + one FQDN) with implicit deny for
   everything else.
 - **Tier-specific requirements.** Basic mandates a dedicated management subnet + management
@@ -200,17 +247,17 @@ screenshots. Private addresses (`10.30.x` / `10.31.x`) and Azure's fixed platfor
 ## How I'd extend this
 
 - **DNAT for inbound publishing.** Add a DNAT rule collection to publish a spoke service to the
-  internet via the firewall's data public IP — the inbound counterpart to this lab's egress focus.
+  internet via the firewall's data public IP: the inbound counterpart to this lab's egress focus.
 - **Diagnostic logging to Log Analytics / Sentinel.** Stream firewall logs (application/network
-  rule hits) to a workspace and hunt denied egress in Sentinel — the natural bridge to Domain 4
-  (security posture & monitoring), where the deferred Defender/Sentinel labs live.
-- **VPN Gateway + Entra ID P2S / Entra Private Access.** The remainder of the planned Lab C —
+  rule hits) to a workspace and hunt denied egress in Sentinel. This is the natural bridge to
+  Domain 4 (security posture & monitoring), where the deferred Defender/Sentinel labs live.
+- **VPN Gateway + Entra ID P2S / Entra Private Access.** The remainder of the planned Lab C:
   point-to-site VPN authenticated with Entra ID (requires the OpenVPN protocol, so VpnGw1+, not
   Basic gateway), or Entra Private Access as the identity-centric successor. Documented rather
   than built here to avoid the ~40-minute gateway provisioning wait.
 - **AI-security extension.** Place an AI inference workload (e.g. an Azure OpenAI-consuming app)
   in the spoke and use FQDN application rules to constrain its egress to *only* the approved model
-  endpoint and telemetry hosts — preventing a compromised AI agent from reaching arbitrary
+  endpoint and telemetry hosts. That prevents a compromised AI agent from reaching arbitrary
   command-and-control or exfiltration destinations. This is precisely the "secure AI workload
   egress" concern SC-500's Domain 3 emphasizes, and it reuses this exact firewall pattern.
 
@@ -224,8 +271,15 @@ az group exists --name lab-az-fw    # -> false once complete
 Deleting the resource group removes the firewall, both public IPs, the VM and its disk, both
 VNets, the policy, and the route table in one operation.
 
+For a Terraform build, run the following from the lab's `terraform` folder instead (running it
+from the repo root does nothing):
+
+```
+terraform destroy
+```
+
 **Cost note:** Azure Firewall Basic bills ~$0.395/hr (~₹33/hr) while provisioned, plus ~₹0.80/hr
 for the two Standard public IPs and a few ₹/hr for the `D2als_v7` VM. This lab was built and torn
 down in a single bounded session (~2 hours), for roughly **₹70-100** of credit burn. Because the
-firewall bills whenever it exists (not per-traffic), same-session teardown is essential — do not
+firewall bills whenever it exists (not per-traffic), same-session teardown is essential. Do not
 leave it provisioned.

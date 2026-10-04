@@ -1,14 +1,14 @@
-# Lab: Network Segmentation — NSGs, ASGs & Traffic Verification
+# Lab: Network Segmentation with NSGs, ASGs & Traffic Verification
 
 > Segment a two-tier VNet so the web tier can reach the data tier **only on 443** and nothing
 > else, using **NSG** rules written against **ASGs** (not IP addresses), then prove it live
-> with **Network Watcher IP flow verify** — 443 allowed, 22 denied, each naming the deciding
-> rule. Closes the flat-network insecure default, where all intra-VNet traffic is allowed by
-> default.
+> with **Network Watcher IP flow verify**: 443 allowed and 22 denied, each result naming the
+> deciding rule. Closes the flat-network insecure default, where all intra-VNet traffic is
+> allowed by default.
 
-**Domain:** SC-500 — Secure storage, databases, and networking
-**Services:** Azure Virtual Network, NSG, ASG, Network Watcher, Azure CLI + Portal. VNet / NSG / ASG / NIC / Network Watcher are free; one small VM ran briefly for live verification, then was deleted.
-**Status:** Completed — segmentation rules applied, effective rules confirmed on the NIC, live IP-flow verify showing 443 allowed / 22 denied.
+**Domain:** SC-500 (Secure storage, databases, and networking)
+**Services:** Azure Virtual Network, NSG, ASG, Network Watcher, Azure CLI + Portal, Terraform. VNet / NSG / ASG / NIC / Network Watcher are free; one small VM ran briefly for live verification, then was deleted.
+**Status:** Completed: segmentation rules applied, effective rules confirmed on the NIC, live IP-flow verify showing 443 allowed / 22 denied.
 
 ---
 
@@ -16,12 +16,12 @@
 
 Demonstrate network micro-segmentation on Azure: split a workload into web and data tiers and
 allow only the one legitimate flow between them (web → data on HTTPS), enforced by NSG rules
-that target **Application Security Groups** rather than brittle IP ranges — then verify the
+that target **Application Security Groups** rather than brittle IP ranges. Then verify the
 result both statically (effective rules) and dynamically (IP flow verify).
 
 ## The problem (insecure default)
 
-A flat network — one subnet, or multiple subnets with only default NSG rules — leaves every
+A flat network (one subnet, or multiple subnets with only default NSG rules) leaves every
 workload able to reach every other. The critical default is `AllowVnetInBound` (priority
 65000, Allow): **all traffic within the VNet is permitted**. So a compromised web server can
 freely reach the database tier on any port. Attaching an NSG does **not** fix this on its own;
@@ -33,7 +33,7 @@ the default allow is still in effect until you add a higher-precedence rule that
 |---|---|---|
 | VNet | `vnet-ai-lab` (10.10.0.0/16), East US | The network |
 | `snet-web` | 10.10.1.0/24 → `nsg-web` | Web (frontend) tier |
-| `snet-data` | 10.10.2.0/24 → `nsg-data` | Data (backend) tier — the one locked down |
+| `snet-data` | 10.10.2.0/24 → `nsg-data` | Data (backend) tier, the one locked down |
 | `asg-web` / `asg-data` | Application Security Groups | Role labels the rules target |
 | `nic-web` / `nic-data` | 10.10.1.4 / 10.10.2.4 | NICs in their subnets + ASGs; the verification endpoints |
 | `vm-data` | `Standard_D2als_v7` (temporary) | Ran briefly so IP flow verify could execute; deleted at cleanup |
@@ -41,7 +41,8 @@ the default allow is still in effect until you add a higher-precedence rule that
 ## What I built
 
 Two subnets, an NSG per subnet, an ASG per tier, and a segmentation ruleset on `nsg-data`
-permitting only `asg-web → asg-data` on 443.
+permitting only `asg-web → asg-data` on 443. The full build definition is in
+[`terraform/main.tf`](terraform/main.tf).
 
 | Setting | Value |
 |---|---|
@@ -56,22 +57,22 @@ permitting only `asg-web → asg-data` on 443.
 
 - **A deny rule that beats the default.** `AllowVnetInBound` (65000) permits all intra-VNet
   traffic. My **Deny at priority 200** (lower number = higher precedence) overrides it, so only
-  the **Allow 443 at 100** gets through. This is the crux: an attached NSG isn't segmentation —
-  a rule that outranks the default is.
+  the **Allow 443 at 100** gets through. This is the crux: an attached NSG isn't segmentation.
+  A rule that outranks the default is.
 - **ASGs, not IP addresses.** Rules reference `asg-web`/`asg-data`; membership lives on the NIC,
-  so scaling out just means adding NICs to the ASG — no rule edits, no hardcoded IPs that drift.
-  Same reference-by-role principle as the custom-RBAC and Key Vault labs.
+  so scaling out just means adding NICs to the ASG. No rule edits, and no hardcoded IPs that
+  drift. Same reference-by-role principle as the custom-RBAC and Key Vault labs.
 - **Honest scope of the claim.** This lab restricts the **web→data path** to 443 only. It does
   not claim a total data-tier lockdown from *every* source (a non-web source would still match
   `AllowVnetInBound`). Tightening to "deny all inbound to data except `asg-web`:443" is listed
   under extensions.
 - **Free resources wherever possible.** VNet, subnets, NSGs, ASGs, NICs, and Network Watcher
-  are all free and carried the whole lab. The single metered resource — one small VM — was
+  are all free and carried the whole lab. The single metered resource (one small VM) was
   created only because **IP flow verify and effective-rules require a running VM behind the
   NIC**, and it was deleted immediately after the tests.
-- **Region/SKU capacity reality.** East US VM capacity was gated for this subscription — the
+- **Region/SKU capacity reality.** East US VM capacity was gated for this subscription: the
   B-series and several D-series sizes returned `SkuNotAvailable`, so `D2als_v7` (the first
-  unrestricted small size the SKU list returned) was used. An environmental constraint,
+  unrestricted small size the SKU list returned) was used. It was an environmental constraint,
   recorded for honesty.
 
 ## Steps & output
@@ -99,7 +100,7 @@ az network vnet subnet update -g lab-az-net --vnet-name vnet-ai-lab -n snet-web 
 az network vnet subnet update -g lab-az-net --vnet-name vnet-ai-lab -n snet-data --network-security-group nsg-data
 ```
 
-A fresh NSG already contains the defaults — note the two that matter:
+A fresh NSG already contains the defaults. Note the two that matter:
 `AllowVnetInBound` (65000, Allow) and `DenyAllInBound` (65500, Deny). So at this point web
 can still reach data: attaching the NSG changed nothing yet.
 
@@ -133,7 +134,7 @@ az network nsg rule create -g lab-az-net --nsg-name nsg-data \
 Result (see Evidence `01`): rules 100/200 sit **above** the defaults; the Deny at 200
 overrides `AllowVnetInBound` at 65000.
 
-**5. Verify — static (effective rules) and live (IP flow verify)**
+**5. Verify: static (effective rules) and live (IP flow verify)**
 
 A running VM is required for both, so a temporary `vm-data` was attached to `nic-data`:
 
@@ -157,56 +158,112 @@ az network watcher test-ip-flow --vm vm-data -g lab-az-net \
   22 → **Access denied / Deny-Web-To-Data-All**. Because the tool resolved `10.10.1.4`→`asg-web`
   and `10.10.2.4`→`asg-data` to match the ASG-based rules, this also confirms the ASGs work.
 
+## Built as code
+
+The lab was first built with the Azure CLI and portal as documented above. The same end state
+is now reproducible from [`terraform/main.tf`](terraform/main.tf) (azurerm 4.x), which passes
+`terraform validate`. The evidence images below come from the original CLI build.
+
+Run it from the lab's `terraform` folder. After the IP flow verify checks, the second apply
+removes the only metered resource (the VM) while keeping the segmentation in place.
+
+```
+cd terraform
+$env:ARM_SUBSCRIPTION_ID = az account show --query id -o tsv
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+terraform apply -var create_test_vm=false
+```
+
+| Lab piece | Terraform resource |
+|---|---|
+| Resource group `lab-az-net` | `azurerm_resource_group` |
+| VNet `vnet-ai-lab` | `azurerm_virtual_network` |
+| Subnets `snet-web`, `snet-data` | `azurerm_subnet` |
+| ASGs `asg-web`, `asg-data` | `azurerm_application_security_group` |
+| NSGs `nsg-web`, `nsg-data` (rules 100 and 200 inline on `nsg-data`) | `azurerm_network_security_group` |
+| NSG attached to each subnet | `azurerm_subnet_network_security_group_association` |
+| NICs `nic-web`, `nic-data` | `azurerm_network_interface` |
+| NIC membership in `asg-web` / `asg-data` | `azurerm_network_interface_application_security_group_association` |
+| Temporary `vm-data` | `azurerm_linux_virtual_machine` (with `tls_private_key` for its SSH key) |
+
+Differences from the CLI build:
+
+- NIC private IPs are pinned as static (10.10.1.4 and 10.10.2.4), so the IP flow verify
+  commands in Steps work unchanged.
+- The temporary VM sits behind a `create_test_vm` variable (default `true`) instead of a
+  separate create and delete.
+- The VM's SSH key is generated by Terraform and kept only in local state.
+- Network Watcher is not declared, because Azure creates it per region automatically. The IP
+  flow verify checks stay as `az network watcher test-ip-flow` commands since they are tests,
+  not infrastructure.
+- The VM size is a variable (`vm_size`, default `Standard_D2als_v7`) for the capacity reason
+  given under design decisions.
+
+State, plans and logs stay on the local machine and are excluded by
+[`terraform/.gitignore`](terraform/.gitignore).
+
 ## Evidence
 
-*No sensitive identifiers appear in these captures — only private IPs (10.10.x.x) and resource names.*
+*No sensitive identifiers appear in these captures; only private IPs (10.10.x.x) and resource names do.*
 
-**Segmentation rules on `nsg-data` — Allow 443 (100) and Deny all (200) above the defaults**
+**Segmentation rules on `nsg-data`: Allow 443 (100) and Deny all (200) above the defaults**
 ![NSG nsg-data inbound rules: priority 100 Allow asg-web to asg-data on 443, priority 200 Deny asg-web to asg-data, above AllowVnetInBound 65000 and DenyAllInBound 65500](images/01-nsg-segmentation.png)
 
-**Effective security rules on `nic-data` — the merged set the NIC actually enforces**
+**Effective security rules on `nic-data`, the merged set the NIC actually enforces**
 ![nic-data effective security rules showing Allow-Web-To-Data-443 dest ports 443-443 and Deny-Web-To-Data-All, in priority order above the default rules](images/02-effective-rules.png)
 
-**IP flow verify — web → data on 443 is allowed (rule 100)**
+**IP flow verify: web → data on 443 is allowed (rule 100)**
 ![Network Watcher IP flow verify result Access allowed, security rule Allow-Web-To-Data-443, NSG nsg-data](images/03-ipflow-allow.png)
 
-**IP flow verify — web → data on 22 is denied (rule 200)**
+**IP flow verify: web → data on 22 is denied (rule 200)**
 ![Network Watcher IP flow verify result Access denied, security rule Deny-Web-To-Data-All, NSG nsg-data](images/04-ipflow-deny.png)
 
 ## SC-500 concepts demonstrated
 
-- **Network segmentation / micro-segmentation** — tiered subnets with least-privilege
+- **Network segmentation / micro-segmentation:** tiered subnets with least-privilege
   east-west rules.
-- **NSG vs ASG** — the NSG is the stateful rulebook (priorities, first-match); the ASG is a
+- **NSG vs ASG.** The NSG is the stateful rulebook (priorities, first-match); the ASG is a
   group of NICs referenced *inside* rules so you express intent (`web → data`) instead of IPs.
-  The exam's core network distinction.
-- **NSG default rules & priority** — `AllowVnetInBound` (65000) permits intra-VNet traffic by
-  default; a custom rule must use a lower priority number to override it (lower = higher
+  This is the exam's core network distinction.
+- **NSG default rules & priority:** `AllowVnetInBound` (65000) permits intra-VNet traffic by
+  default, so a custom rule must use a lower priority number to override it (lower = higher
   precedence, first match wins).
-- **Effective security rules** — the merged evaluation applied to a NIC, resolving custom and
+- **Effective security rules:** the merged evaluation applied to a NIC, resolving custom and
   default rules together.
-- **Network Watcher IP flow verify** — simulating a packet against the effective rules to get a
-  definitive Allow/Deny and the deciding rule; the go-to connectivity diagnostic.
+- **Network Watcher IP flow verify** simulates a packet against the effective rules to get a
+  definitive Allow/Deny and the deciding rule. It is the go-to connectivity diagnostic.
 - **Subnet vs NIC NSG association**, and **stateful** NSG behaviour (return traffic
   auto-allowed).
 
 ## How I'd extend this
 
-- **Full data-tier lockdown** — add a low-priority `Deny all inbound to asg-data` and allow only
+- **Full data-tier lockdown:** add a low-priority `Deny all inbound to asg-data` and allow only
   `asg-web`:443, so *no* source (not just web) can reach data on anything else.
-- **Complete the web tier** — `nsg-web` rules (allow 443 from the load balancer / internet,
+- **Complete the web tier** with `nsg-web` rules (allow 443 from the load balancer / internet,
   deny the rest) for an end-to-end two-tier policy.
-- **Azure Virtual Network Manager (AVNM)** — push these as **security admin rules** across many
+- **Azure Virtual Network Manager (AVNM):** push these as **security admin rules** across many
   VNets, which users can't override, for org-scale consistency.
 - **NSG flow logs → Log Analytics / Sentinel** for east-west traffic visibility (Domain 4).
 - **Combine with the private-endpoint lab** so PaaS traffic (storage, SQL, Key Vault) also stays
   on this segmented VNet rather than the public internet.
-- **AI extension** — place AI training and inference subnets under the same tiered NSG/ASG model;
-  the inference tier reaches the data tier only on the one required port. (Ties to Domain 3.)
-- **Permanent live verification** — IP flow verify was run against a temporary VM; in an
+- **AI extension:** place AI training and inference subnets under the same tiered NSG/ASG model,
+  where the inference tier reaches the data tier only on the one required port. (Ties to
+  Domain 3.)
+- **Permanent live verification.** IP flow verify was run against a temporary VM; in an
   unrestricted subscription that VM would be a real workload rather than a throwaway.
 
 ## Cleanup
+
+For the Terraform build, run this from the lab's `terraform` folder (running it from the repo
+root does nothing):
+
+```
+terraform destroy
+```
+
+For the CLI build:
 
 ```bash
 az group delete --name lab-az-net --yes --no-wait

@@ -6,9 +6,9 @@
 > roles, a **managed identity** for credential-free retrieval, secret rotation, all three
 > object types, and network isolation.
 
-**Domain:** SC-500 — Secure storage, databases, and networking
-**Services:** Azure Key Vault (Standard), managed identity, Azure RBAC, Azure CLI + Portal. No hourly cost (transaction-billed; a lab is fractions of a cent).
-**Status:** Completed — vault hardened, data-plane deny proven, RBAC access model built, network locked down.
+**Domain:** SC-500 (Secure storage, databases, and networking)
+**Services:** Azure Key Vault (Standard), managed identity, Azure RBAC, Azure CLI + Portal, Terraform. No hourly cost (transaction-billed; a lab is fractions of a cent).
+**Status:** Completed: vault hardened, data-plane deny proven, RBAC access model built, network locked down.
 
 ---
 
@@ -18,20 +18,20 @@ Show how Key Vault is *secured*, not just *used*. The lab builds a vault on the 
 permission model and demonstrates the security spine an SC-500 engineer is expected to reason
 about: the control-plane/data-plane split, least-privilege data-plane roles (Officer vs User),
 credential-free access via managed identity, secret lifecycle (versioning/rotation), and
-network isolation — with soft-delete and purge protection on from creation.
+network isolation. Soft-delete and purge protection are on from creation.
 
 ## The problem (insecure default)
 
 Two insecure defaults, one lab:
 
 1. **Secrets in code/config.** The default way apps get a password or API key is to paste it
-   into source, an environment variable, or a config file — where it leaks through version
+   into source, an environment variable, or a config file, where it leaks through version
    control, logs, backups, or a single compromised host. The fix is to keep the secret in a
    vault and let an app fetch it at runtime with an identity, never a stored credential.
 2. **The legacy access-policy model.** With vault *access policies*, any principal holding
    `Contributor` (or another role with `Microsoft.KeyVault/vaults/write`) can call
-   `set-policy` and **grant themselves data-plane access** — reading every secret — and it
-   shows in the activity log as a routine config change, not a privilege escalation. The RBAC
+   `set-policy` and **grant themselves data-plane access**, reading every secret. It shows in
+   the activity log as a routine config change, not a privilege escalation. The RBAC
    model closes that hole by separating who can *manage the vault* from who can *read its
    data*, and restricting the power to grant data-plane access to `Owner` / `User Access
    Administrator` only. As of API version 2026-02-01 RBAC is the default model for new vaults.
@@ -41,7 +41,7 @@ Two insecure defaults, one lab:
 | Element | Value | Part in this lab |
 |---|---|---|
 | PDFMerge Administrator | Global Admin + Azure **Owner** | Creates the vault; **refused** data-plane access until granted a Key Vault role (the headline) |
-| Key vault | `kv-lab-14571` — RG `lab-az-pim`, East US, Standard | The resource being secured |
+| Key vault | `kv-lab-14571`, RG `lab-az-pim`, East US, Standard | The resource being secured |
 | `id-lab-app` | User-assigned **managed identity** | Stand-in for an application; least-privilege secret reader |
 | Scope | Resource group `lab-az-pim` | All role assignments scoped to the vault, not the subscription |
 
@@ -53,12 +53,12 @@ types, rotation, and public network access disabled.
 | Setting | Value |
 |---|---|
 | Vault | `kv-lab-14571` (Standard SKU) |
-| Authorization model | **Azure RBAC** (`enableRbacAuthorization: true`) — not access policies |
+| Authorization model | **Azure RBAC** (`enableRbacAuthorization: true`), not access policies |
 | Data protection | Soft-delete (on, 7-day retention) + **purge protection** (on) |
 | Network | Public access **Disabled**; trusted Microsoft services bypass = on |
 | Objects | secret `db-password` (2 versions), key `lab-key` (RSA 2048), certificate `lab-cert` (self-signed) |
-| Access — admin | PDFMerge Administrator -> **Key Vault Administrator** (vault scope) |
-| Access — app | `id-lab-app` managed identity -> **Key Vault Secrets User** (vault scope) |
+| Access (admin) | PDFMerge Administrator -> **Key Vault Administrator** (vault scope) |
+| Access (app) | `id-lab-app` managed identity -> **Key Vault Secrets User** (vault scope) |
 | Method | Azure CLI + Portal |
 
 ### Design decisions (the "why")
@@ -68,15 +68,15 @@ types, rotation, and public network access disabled.
   who can grant access to `Owner` / `User Access Administrator`. This is the primary security
   reason to choose RBAC, and it's now the default for new vaults.
 - **Least privilege, split by job.** I hold **Key Vault Administrator** (build/manage all
-  objects); the app identity holds **Key Vault Secrets User** (read secret *values* only — no
-  write, no keys, no certs). Officer roles manage; User roles consume. Both are scoped to the
-  vault, not the subscription.
+  objects); the app identity holds **Key Vault Secrets User** (read secret *values* only, with
+  no write, no keys, no certs). Officer roles manage; User roles consume. Both are scoped to
+  the vault, not the subscription.
 - **Managed identity for retrieval.** The app authenticates as an Azure identity and reads the
-  secret at runtime — no credential in code, config, or env var. This is the credential-free
-  pattern the whole lab is built to enable.
+  secret at runtime. There is no credential in code, config, or env var. This is the
+  credential-free pattern the whole lab is built to enable.
 - **Purge protection + soft-delete on from creation.** Data-protection control: a deleted
   vault (or object) is recoverable, and purge protection means it *cannot* be force-purged
-  before the retention window — so an attacker can't delete a vault to destroy its secrets.
+  before the retention window ends, so an attacker can't delete a vault to destroy its secrets.
   Trade-off: teardown is not instant (see Cleanup); I set retention to the 7-day minimum to
   keep that window short.
 - **Network isolation.** Public data-plane access is disabled (defence in depth for a vault
@@ -84,7 +84,7 @@ types, rotation, and public network access disabled.
   so first-party services (e.g. Defender for Cloud, backup) can still reach it without opening
   a general hole.
 - **Resource-provider registration (aside).** `Microsoft.KeyVault` had to be registered on the
-  subscription before *anyone* — even an Owner — could create a vault. Resource providers are a
+  subscription before *anyone*, even an Owner, could create a vault. Resource providers are a
   subscription-level enablement gate that sits underneath both RBAC and Policy.
 
 ## Steps & output
@@ -117,9 +117,9 @@ az keyvault create \
 }
 ```
 
-`accessPolicies: []` is empty by design — the data plane is governed by RBAC, not policies.
+`accessPolicies: []` is empty by design: the data plane is governed by RBAC, not policies.
 
-**2. Try to write a secret as Owner — refused (the headline)**
+**2. Try to write a secret as Owner: refused (the headline)**
 
 ```bash
 az keyvault secret set --vault-name kv-lab-14571 --name "db-password" --value "<value>"
@@ -134,10 +134,10 @@ please wait several minutes for role assignments to become effective.
 You are unauthorized to view these contents.
 ```
 
-Nothing is wrong with the account — this is the point. Owner is a **control-plane** role; it
-grants zero **data-plane** access under the RBAC model.
+Nothing is wrong with the account; this is the point. Owner is a **control-plane** role, and
+it grants zero **data-plane** access under the RBAC model.
 
-**3. Grant a data-plane role — Key Vault Administrator, scoped to the vault**
+**3. Grant a data-plane role (Key Vault Administrator, scoped to the vault)**
 
 ```bash
 SUB=$(az account show --query id -o tsv)
@@ -157,11 +157,11 @@ az role assignment create \
 }
 ```
 
-`00482a5a-...` is the built-in **Key Vault Administrator**. Data-plane grants are **not instant** —
-allow a few minutes for propagation before the next step (the deny banner in step 2 warns of
+`00482a5a-...` is the built-in **Key Vault Administrator**. Data-plane grants are **not instant**.
+Allow a few minutes for propagation before the next step (the deny banner in step 2 warns of
 exactly this).
 
-**4. Rerun the write — now it succeeds; add a second version (rotation)**
+**4. Rerun the write (now it succeeds) and add a second version (rotation)**
 
 ```bash
 az keyvault secret set --vault-name kv-lab-14571 --name "db-password" --value "<value-v1>"
@@ -177,11 +177,11 @@ https://kv-lab-14571.vault.azure.net/secrets/db-password/106f7a0b...  True     2
 https://kv-lab-14571.vault.azure.net/secrets/db-password/cf67807c...  True     2026-08-27T19:19:25+00:00
 ```
 
-Same command, opposite result from step 2 — the only change was the data-plane role. Writing
+Same command, opposite result from step 2. The only change was the data-plane role. Writing
 the same secret name again created a **new version** rather than overwriting; both stay
 retrievable and revocable. (Secret values are never committed to this repo.)
 
-**5. Add the other two object types — a key and a certificate**
+**5. Add the other two object types: a key and a certificate**
 
 ```bash
 az keyvault key create --vault-name kv-lab-14571 --name "lab-key" --kty RSA --size 2048
@@ -198,7 +198,7 @@ All three object types now exist. The RSA private key was generated **inside** t
 never leaves it. Each object type has its own Officer role (Secrets / Crypto / Certificates
 Officer); Key Vault Administrator spans all three.
 
-**6. Grant a managed identity least-privilege read — the credential-free pattern**
+**6. Grant a managed identity least-privilege read (the credential-free pattern)**
 
 ```bash
 az identity create --name "id-lab-app" --resource-group lab-az-pim --location eastus
@@ -218,16 +218,16 @@ az role assignment create \
 }
 ```
 
-`4633458b-...` is the built-in **Key Vault Secrets User** — read secret *values* only; it cannot
-write secrets or touch keys/certs. `--assignee-object-id` + `--assignee-principal-type
+`4633458b-...` is the built-in **Key Vault Secrets User**. It reads secret *values* only and
+cannot write secrets or touch keys/certs. `--assignee-object-id` + `--assignee-principal-type
 ServicePrincipal` is used deliberately (a managed identity resolves as a service principal),
 which also avoids a Microsoft Graph lookup.
 
 > **Scope of proof.** This step establishes the *authorization model* for credential-free
 > access (an identity + a least-privilege role + no stored secret). Demonstrating the identity
 > *actually retrieving* the secret requires attaching it to a compute resource (VM / Function /
-> App Service) that calls the vault via IMDS — documented as an extension below rather than
-> deployed here, to keep the lab free.
+> App Service) that calls the vault via IMDS. That is documented as an extension below rather
+> than deployed here, to keep the lab free.
 
 **7. Disable public network access**
 
@@ -240,69 +240,123 @@ az keyvault update --name kv-lab-14571 --public-network-access Disabled
 ```
 
 The vault's data endpoint is now private (see Evidence `03-network-disabled.png`). Note: this
-also cuts off CLI/Cloud Shell data-plane calls, which aren't on an allowed network — expected,
-and it demonstrates the lockdown. The "trusted Microsoft services" bypass remains on so
-first-party services can still reach the vault.
+also cuts off CLI/Cloud Shell data-plane calls, which aren't on an allowed network. That is
+expected, and it demonstrates the lockdown. The "trusted Microsoft services" bypass remains on
+so first-party services can still reach the vault.
+
+## Built as code
+
+The lab was first built with the Azure CLI and portal as documented above. The same end state
+is now reproducible from [`terraform/main.tf`](terraform/main.tf) (azurerm 4.x), which passes
+`terraform validate`. The evidence images below come from the original CLI build, not from a
+Terraform run.
+
+Run it from the lab's `terraform` folder:
+
+```
+cd terraform
+$env:ARM_SUBSCRIPTION_ID = az account show --query id -o tsv
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+terraform apply -var public_network_access_enabled=false
+```
+
+The last command is a second apply that closes the public endpoint. The build needs two
+applies because Terraform writes the secret, key and certificate over the data plane, and once
+the vault is locked down, plans run from outside the network cannot read them.
+
+| Lab piece | Terraform resource |
+|---|---|
+| Resource group `lab-az-kv` | `azurerm_resource_group` |
+| Vault name suffix | `random_string` |
+| Key vault (RBAC, purge protection, 7-day retention, trusted services bypass) | `azurerm_key_vault` |
+| Key Vault Administrator for the deploying identity | `azurerm_role_assignment` |
+| Wait for the data-plane role to take effect | `time_sleep` |
+| Secret `db-password` and its generated value | `azurerm_key_vault_secret`, `random_password` |
+| Key `lab-key` (RSA 2048) | `azurerm_key_vault_key` |
+| Certificate `lab-cert` (self-signed) | `azurerm_key_vault_certificate` |
+| Managed identity `id-lab-app` | `azurerm_user_assigned_identity` |
+| Key Vault Secrets User for `id-lab-app` | `azurerm_role_assignment` |
+
+Differences from the CLI build:
+
+- A dedicated resource group, `lab-az-kv`, replaces the shared `lab-az-pim`.
+- The vault name gets a random suffix (`kv-lab-<suffix>`) because purge protected vault names
+  stay reserved after a delete. `kv-lab-14571` in the evidence is the original vault.
+- Key Vault Administrator is granted to whoever runs Terraform, followed by a 90 second wait
+  for the data-plane role to take effect. The "Owner refused" moment from step 2 is therefore
+  shown by the CLI walkthrough and not reproduced by Terraform.
+- The secret value is generated by Terraform and lives only in local state, which is never
+  committed.
+- Terraform creates one secret version. Rotation (a second version) is shown in the CLI steps.
+- The provider is configured with `resource_provider_registrations = "none"`, so
+  `Microsoft.KeyVault` must already be registered on the subscription (step 1).
+
+State, plans and logs stay on the local machine and are excluded by
+[`terraform/.gitignore`](terraform/.gitignore).
 
 ## Evidence
 
 *No sensitive identifiers appear in these captures.*
 
-**Control plane != data plane — secret access refused to the vault Owner**
+**Control plane != data plane: secret access refused to the vault Owner**
 ![Key Vault Secrets blade showing the operation is not allowed by RBAC and You are unauthorized to view these contents for the subscription Owner](images/01-owner-denied.png)
 
-**RBAC data-plane access model — Administrator (me) + Secrets User (app identity), both scoped to the vault**
+**RBAC data-plane access model: Administrator (me) + Secrets User (app identity), both scoped to the vault**
 ![Access control IAM role assignments grouped by role: Key Vault Administrator on the admin user and Key Vault Secrets User on the id-lab-app managed identity, both scoped to This resource](images/02-iam-roles.png)
 
-**Network isolation — public access disabled**
+**Network isolation: public access disabled**
 ![Key Vault Networking blade with Disable public access selected and trusted Microsoft services bypass enabled](images/03-network-disabled.png)
 
 ## Configuration & identifiers (redacted)
 
 This lab is imperative (Azure CLI), so the evidence is the command output above rather than a
-single config file. Redaction follows the repo convention: **subscription ID**, **tenant ID**,
-**user/managed-identity object IDs**, the **managed-identity client ID**, and **UPN / tenant
-domain** are placeholdered. **Kept intact:** the built-in role-definition GUIDs — Key Vault
-Administrator `00482a5a-887f-4fb3-b363-3b7fe8e74483` and Key Vault Secrets User
-`4633458b-17de-408a-b874-0445c86b69e6` — which are Microsoft's public identifiers, identical
+single config file. The full build definition for the Terraform route is
+[`terraform/main.tf`](terraform/main.tf). Redaction follows the repo convention:
+**subscription ID**, **tenant ID**, **user/managed-identity object IDs**, the
+**managed-identity client ID**, and **UPN / tenant domain** are placeholdered. **Kept intact:**
+the built-in role-definition GUIDs (Key Vault Administrator
+`00482a5a-887f-4fb3-b363-3b7fe8e74483` and Key Vault Secrets User
+`4633458b-17de-408a-b874-0445c86b69e6`). These are Microsoft's public identifiers, identical
 in every tenant (same rationale as the public policy/role-template GUIDs in the Domain 1 labs).
 
 ## SC-500 concepts demonstrated
 
-- **Control plane vs data plane** — management of the vault resource (RBAC on ARM) is separate
+- **Control plane vs data plane.** Management of the vault resource (RBAC on ARM) is separate
   from access to its data (secrets/keys/certs). Being **Owner is not enough** to read a secret.
   This is the headline distinction and the #1 Key Vault gotcha.
-- **RBAC vs access-policy authorization models** — why RBAC is preferred (prevents
+- **RBAC vs access-policy authorization models:** why RBAC is preferred (prevents
   `Contributor` self-granting via `set-policy`) and is now the default for new vaults.
-- **Least privilege / Officer vs User roles** — Administrator to build, Secrets User to read;
+- **Least privilege / Officer vs User roles:** Administrator to build, Secrets User to read;
   scoped to the vault (RBAC also supports scoping to an individual secret).
-- **Managed identity** — credential-free access; the app holds an identity, never a secret.
-- **Secret lifecycle** — automatic versioning and rotation; old versions retained/revocable.
-- **Object types** — secrets, keys (private key never leaves the vault), certificates.
-- **Data protection** — soft-delete + purge protection, and the recoverability guarantee.
-- **Network isolation** — disabling public access; the trusted-Microsoft-services exception.
-- **Eventual consistency** — RBAC role-assignment propagation lag (the deny banner's warning).
-- **Resource-provider registration** — a subscription-level gate beneath RBAC and Policy.
+- **Managed identity:** credential-free access; the app holds an identity, never a secret.
+- **Secret lifecycle:** automatic versioning and rotation; old versions retained/revocable.
+- **Object types:** secrets, keys (private key never leaves the vault), certificates.
+- **Data protection:** soft-delete + purge protection, and the recoverability guarantee.
+- **Network isolation:** disabling public access; the trusted-Microsoft-services exception.
+- **Eventual consistency:** RBAC role-assignment propagation lag (the deny banner's warning).
+- **Resource-provider registration:** a subscription-level gate beneath RBAC and Policy.
 
 ## How I'd extend this
 
-- **Live managed-identity retrieval** — attach `id-lab-app` to a VM/Function/App Service and
+- **Live managed-identity retrieval.** Attach `id-lab-app` to a VM/Function/App Service and
   read `db-password` via `DefaultAzureCredential` / IMDS, proving the end-to-end credential-free
   fetch (needs compute; minor cost).
-- **Scope a role to a single secret** — assign Key Vault Secrets User at
+- **Scope a role to a single secret.** Assign Key Vault Secrets User at
   `.../vaults/kv-lab-14571/secrets/db-password` instead of the vault, for per-secret least
   privilege.
-- **Private endpoint** — replace "public access disabled" with a private endpoint + private DNS
+- **Private endpoint.** Replace "public access disabled" with a private endpoint + private DNS
   for true network-private access from a VNet.
-- **Automated rotation** — Event Grid `SecretNearExpiry` -> Function to rotate, closing the loop
+- **Automated rotation.** Event Grid `SecretNearExpiry` -> Function to rotate, closing the loop
   on the versioning shown here.
-- **Diagnostic logging** — stream `AuditEvent` to Log Analytics to see who read which secret
+- **Diagnostic logging.** Stream `AuditEvent` to Log Analytics to see who read which secret
   when (ties into the Domain 4 monitoring story).
-- **AI extension** — the "secure AI workload" case: an Azure OpenAI-backed app keeps its API key
+- **AI extension.** The "secure AI workload" case: an Azure OpenAI-backed app keeps its API key
   in Key Vault and reads it via managed identity, so no model/endpoint credential ever lives in
   code. (Ties to Domain 3.)
 - **Cross-link:** "Secret Scanning + Key Vault with Microsoft Defender for Cloud" is a Domain 4
-  (posture) topic — covered in the Defender lab, not here.
+  (posture) topic, covered in the Defender lab rather than here.
 
 ## Cleanup
 
@@ -311,13 +365,20 @@ az identity delete --name "id-lab-app" --resource-group lab-az-pim
 az keyvault delete --name kv-lab-14571 --resource-group lab-az-pim   # -> soft-delete, not purged
 ```
 
+For the Terraform build, tear down with the command below. It must be run from the lab's
+`terraform` folder; running it from the repo root does nothing.
+
+```
+terraform destroy
+```
+
 **Purge protection is intentionally not undoable:** the deleted vault stays in soft-delete for
 the 7-day retention window and the name `kv-lab-14571` remains reserved until it expires;
 `az keyvault purge` is **refused by design**. This costs **$0** (soft-deleted vaults aren't
-billed) and is the correct security behaviour — purge protection exists precisely so a vault
+billed) and is the correct security behaviour: purge protection exists precisely so a vault
 can't be hard-deleted to destroy its secrets. Role assignments are removed automatically with
-the vault and identity. The `lab-az-pim` resource group is shared with the PIM/RBAC/Policy labs
-— leave it in place.
+the vault and identity. The `lab-az-pim` resource group is shared with the PIM/RBAC/Policy labs,
+so leave it in place.
 
 Key Vault Standard incurs no hourly cost (transaction-billed; this lab is fractions of a cent).
 No Premium/Managed HSM resources were created.
