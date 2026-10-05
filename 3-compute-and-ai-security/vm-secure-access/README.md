@@ -7,7 +7,7 @@
 > from deleting the backups. Every control was configured and proven live.
 
 **Domain:** 3 (Compute and AI Security)
-**Services:** Microsoft Defender for Servers, Just in Time VM access, Azure Bastion, Recovery Services vault, Azure Backup, Resource Guard
+**Services:** Microsoft Defender for Servers, Just in Time VM access, Azure Bastion, Recovery Services vault, Azure Backup, Resource Guard, Terraform
 **Status:** Complete, evidenced, and torn down
 
 ---
@@ -130,6 +130,75 @@ az backup vault show --resource-group lab-az-vmsec2 --name rsv-vmsec2 --query "p
 Azure Bastion for connection without exposure: a dedicated AzureBastionSubnet, a Standard public IP
 on the Bastion host, and a browser session to the VM which itself has no public IP.
 
+## Built as code
+
+The lab was first built with the Azure CLI and the portal as documented above. Most of the same end
+state is now reproducible from [`terraform/main.tf`](terraform/main.tf) (azurerm 4.x): the VM and
+its network, Bastion, the Defender for Servers plan, the vault, the VM backup, the Resource Guard
+and its link to the vault. The configuration passes `terraform validate`. The lab is only partly
+Terraform, because the Just in Time policy has no azurerm resource. The evidence below comes from
+the original build, not from a Terraform run.
+
+```
+cd terraform
+$env:ARM_SUBSCRIPTION_ID = az account show --query id -o tsv
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+```
+
+| Piece of the lab | Terraform resource |
+|---|---|
+| Resource group `lab-az-vmsec2` | `azurerm_resource_group` |
+| Defender for Servers Plan 2, subscription scope | `azurerm_security_center_subscription_pricing` |
+| VNet, VM subnet and AzureBastionSubnet | `azurerm_virtual_network`, `azurerm_subnet` |
+| NSG `vm-secure2NSG` with no custom rules, attached to the NIC | `azurerm_network_security_group`, `azurerm_network_interface_security_group_association` |
+| VM `vm-secure2` with no public IP | `azurerm_network_interface`, `azurerm_linux_virtual_machine` |
+| SSH key, kept in local state | `tls_private_key` |
+| Bastion host and its Standard public IP | `azurerm_bastion_host`, `azurerm_public_ip` |
+| Recovery Services vault `rsv-vmsec2` | `azurerm_recovery_services_vault` |
+| Backup policy and VM protection | `azurerm_backup_policy_vm`, `azurerm_backup_protected_vm` |
+| Resource Guard `rg-guard-vmsec2` | `azurerm_data_protection_resource_guard` |
+| Multi User Authorization (guard linked to the vault) | `azurerm_recovery_services_vault_resource_guard_association` |
+
+Steps that stay in the walkthrough:
+
+- **Just in Time policy.** azurerm has no resource for it, so after `terraform apply` the policy is
+  still written as `jitpolicy.json` and applied with the `az rest` PUT shown in Steps. The VM ID it
+  needs comes from `terraform output -raw vm_id`. The azapi provider could manage the policy as
+  a `Microsoft.Security/locations/jitNetworkAccessPolicies` resource, but it is not used here.
+- **Just in Time access request and the NSG check.** These are actions taken against a running
+  environment, not infrastructure, so they remain the `az rest` POST and `az network nsg rule list`
+  commands above.
+- **The Bastion session.** The connection is made in the browser as before. The SSH private key is
+  read with `terraform output -raw ssh_private_key` and should never be saved inside the repository.
+
+Differences from the CLI build:
+
+- The Resource Guard is linked to the vault by Terraform instead of the vault Properties page. The
+  link is created only after the VM is protected, so on destroy it is removed first and stopping
+  protection is no longer a guarded operation by the time Terraform reaches it.
+- The vault is created with soft delete turned off (`soft_delete_enabled = false`) so that
+  `terraform destroy` can delete the backup data and the vault in one run. This is a lab
+  convenience. A production vault keeps soft delete on, and Multi User Authorization then guards
+  any attempt to turn it off.
+- The VM is protected by a daily Enhanced (V2) policy, `bkpol-vmsec2-daily`, with seven days of
+  retention. The VM is created with secure boot and vTPM (Trusted Launch), and Trusted Launch VMs
+  can only use an Enhanced policy.
+- Bastion uses the Basic SKU, with the host named `bastion-vmsec2` and its public IP
+  `pip-bastion-vmsec2`. The network uses 10.0.0.0/16, with the VM in 10.0.0.0/24 and Bastion in
+  10.0.1.0/26.
+- Defender for Servers Plan 2 is managed by Terraform unless `-var manage_defender_for_servers=false`
+  is passed. Destroying it returns the plan to Free, which replaces the separate
+  `az security pricing create` step, so leave it unmanaged if other workloads in the subscription
+  rely on Plan 2.
+- The VM size is a variable (default `Standard_D2als_v7`), so a region without capacity can be
+  handled with `-var vm_size=...` and no code change.
+
+State, plans and logs stay on the local machine and are excluded by
+[`terraform/.gitignore`](terraform/.gitignore). The state also holds the generated SSH private key,
+which is one more reason it never leaves the machine.
+
 ## Evidence
 
 *No sensitive identifiers appear in these images. Subscription and tenant identifiers, object IDs,
@@ -159,7 +228,9 @@ retained as they are not sensitive.*
 
 ## Configuration and identifiers (redacted)
 
-Built with the Azure CLI and the portal. Subscription identifiers in resource paths are shown as
+Built with the Azure CLI and the portal. Everything except the Just in Time policy is also
+defined as code in [`terraform/main.tf`](terraform/main.tf), which is the build definition for
+that part of the lab. Subscription identifiers in resource paths are shown as
 `<SUBSCRIPTION_ID>`. The Resource Guard operations list, which enumerates every destructive backup
 operation the guard gates (delete protection, disable soft delete, reduce retention, remove MUA,
 stop protection, weaken immutability, and more), was reviewed during the build and confirms what the
@@ -210,6 +281,24 @@ The theme is consistent: deny broadly, grant narrowly and briefly, connect witho
 protect the recovery layer.
 
 ## Cleanup
+
+For the Terraform build, delete the Just in Time policy first, because Terraform did not create it
+and does not know about it. Then run `terraform destroy` from the lab's `terraform` folder (running
+it from the repository root does nothing):
+
+```
+az rest --method DELETE --uri "https://management.azure.com/subscriptions/<SUBSCRIPTION_ID>/resourceGroups/lab-az-vmsec2/providers/Microsoft.Security/locations/eastus/jitNetworkAccessPolicies/default?api-version=2020-01-01"
+terraform destroy
+```
+
+If the destroy stops while removing the Resource Guard link, remove Multi User Authorization from
+the vault Properties page (or with the command below) and run `terraform destroy` again:
+
+```
+az backup vault resource-guard-mapping delete --resource-group lab-az-vmsec2 --name rsv-vmsec2
+```
+
+For the CLI build:
 
 ```
 az group delete --name lab-az-vmsec2 --yes --no-wait

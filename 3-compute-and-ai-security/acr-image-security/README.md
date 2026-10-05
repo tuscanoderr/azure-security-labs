@@ -1,12 +1,18 @@
 # Container Image Security in Azure Container Registry
 
+## Exam domain
+
+Domain 3, Secure compute and application platform services. This lab sits in the "Secure Azure Application Platform Services" section and pairs with the managed identity and Key Vault work as the supply chain half of application platform security.
+
 ## Objective
 
 Demonstrate two registry side controls that protect the container supply chain: removing the shared registry credential so all access flows through Entra identity and role based access, and making a stored image immutable so a trusted artifact cannot be silently overwritten or deleted. The headline proof is a delete attempt against a locked image being refused by the registry.
 
-## Exam domain
+## Why these controls matter
 
-Domain 3, Secure compute and application platform services. This lab sits in the "Secure Azure Application Platform Services" section and pairs with the managed identity and Key Vault work as the supply chain half of application platform security.
+The registry admin account is a single shared credential baked into the registry. Anything holding it can push and pull with no individual attribution and no conditional access. Disabling it forces every operation through Entra and role based access control, which gives per identity permissions, auditability, and the ability to layer conditional access. I created the registry with the account already disabled so there was never a window in which the shared credential existed.
+
+Image immutability protects against tampering after an image is trusted. Without a lock, an actor with push rights can overwrite `lab/sample:v1` with a different image under the same tag, and downstream deployments that pull `v1` would run the substituted image unknowingly. Locking the tag closes that path. The same lock also blocks deletion, which protects against destructive actions against a known good artifact.
 
 ## What I built
 
@@ -15,11 +21,11 @@ Domain 3, Secure compute and application platform services. This lab sits in the
 - A per image lock on that tag setting `writeEnabled` and `deleteEnabled` to false, leaving the image listable and pullable but frozen against change or removal.
 - A deliberate delete attempt that the registry rejected, proving the immutability is enforced rather than merely configured.
 
-## Why these controls matter
+## Notes and honest caveats
 
-The registry admin account is a single shared credential baked into the registry. Anything holding it can push and pull with no individual attribution and no conditional access. Disabling it forces every operation through Entra and role based access control, which gives per identity permissions, auditability, and the ability to layer conditional access. I created the registry with the account already disabled so there was never a window in which the shared credential existed.
-
-Image immutability protects against tampering after an image is trusted. Without a lock, an actor with push rights can overwrite `lab/sample:v1` with a different image under the same tag, and downstream deployments that pull `v1` would run the substituted image unknowingly. Locking the tag closes that path. The same lock also blocks deletion, which protects against destructive actions against a known good artifact.
+- The image was placed with `az acr import` rather than built with `az acr build`. ACR Tasks compute is disallowed on this subscription (`TasksOperationsNotAllowed`), so the server side build path is unavailable here. Import copies an existing public image into the registry through the same Entra authentication and produces a real, lockable artifact, so the security objective is unaffected. Only the origin of the bytes differs.
+- This lab uses the per image lock, which is available on the Basic tier. Automatic, policy driven immutable tag rules that apply repository wide are a Premium tier feature and were not used here. They are described under how I would extend.
+- Public network access on the registry is left Enabled for the lab. Restricting it is covered under how I would extend.
 
 ## Build steps
 
@@ -63,6 +69,56 @@ Attempt the delete, which the registry refuses:
 az acr repository delete --name acrlockd3r7 --image lab/sample:v1 --yes
 ```
 
+## Built as code
+
+The lab was first built with the Azure CLI as documented above. The registry side of it (the
+resource group and the registry with the admin account disabled) is now reproducible from
+[`terraform/main.tf`](terraform/main.tf) (azurerm 4.x), which passes `terraform validate`.
+This is a partial build: the image import, the lock and the delete attempt are data plane steps
+and stay as CLI commands. The evidence images below come from the original CLI build, not from
+a Terraform run.
+
+Run it from the lab's `terraform` folder:
+
+```
+cd terraform
+$env:ARM_SUBSCRIPTION_ID = az account show --query id -o tsv
+terraform init
+terraform plan -out tfplan
+terraform apply tfplan
+```
+
+The provider is configured not to register resource providers, so the one time
+`az provider register --namespace Microsoft.ContainerRegistry` step from Build steps still
+applies to a fresh subscription.
+
+| Lab piece | Terraform resource |
+|---|---|
+| Resource group `lab-az-acr` | `azurerm_resource_group` |
+| Registry name suffix | `random_string` |
+| Registry on the Basic tier, admin account disabled, public network access left enabled | `azurerm_container_registry` |
+
+Steps that stay as CLI, run against the registry name Terraform prints as `registry_name`:
+
+- `az acr import` to place `lab/sample:v1` in the registry through Entra identity. Images are
+  registry content, not Azure resources, so azurerm has no resource for them.
+- `az acr repository update` to lock the tag with `writeEnabled` and `deleteEnabled` set to
+  false. The per image lock is a data plane attribute with no azurerm equivalent.
+- `az acr repository delete` to show the refused delete. This is the test, so it belongs in
+  the CLI run rather than in the build definition.
+- Releasing the lock and removing the image before teardown, as described under Teardown.
+
+Differences from the CLI build:
+
+- The registry name gets a random suffix (`acrlock<suffix>`) because registry names are
+  global. `acrlockd3r7` in the evidence is the original registry.
+- Public network access is set explicitly to enabled in `main.tf`. The CLI build left it at
+  the default, which is also enabled.
+- Provider registration is not done by Terraform. It stays a CLI prerequisite.
+
+State, plans and logs stay on the local machine and are excluded by
+[`terraform/.gitignore`](terraform/.gitignore).
+
 ## Evidence
 
 Registry created on the Basic tier with the admin account disabled and provisioning succeeded:
@@ -82,12 +138,6 @@ The delete attempt refused by the registry with "The operation is disallowed on 
 ![Delete attempt refused by the registry](images/04-delete-blocked.png)
 
 A useful detail visible during the run: when the registry token was not yet available, the CLI fell back to admin credentials and reported "Admin user is disabled." That confirms the shared account really is off and that access depends on Entra identity.
-
-## Notes and honest caveats
-
-- The image was placed with `az acr import` rather than built with `az acr build`. ACR Tasks compute is disallowed on this subscription (`TasksOperationsNotAllowed`), so the server side build path is unavailable here. Import copies an existing public image into the registry through the same Entra authentication and produces a real, lockable artifact, so the security objective is unaffected. Only the origin of the bytes differs.
-- This lab uses the per image lock, which is available on the Basic tier. Automatic, policy driven immutable tag rules that apply repository wide are a Premium tier feature and were not used here. They are described under how I would extend.
-- Public network access on the registry is left Enabled for the lab. Restricting it is covered under how I would extend.
 
 ## Cross links to other labs
 
@@ -109,6 +159,13 @@ The lab image was removed during the exercise, which is the expected end state o
 
 ```
 az group delete --name lab-az-acr --yes --no-wait
+```
+
+For the Terraform build, run the following from the lab's `terraform` folder (running it from
+the repo root does nothing):
+
+```
+terraform destroy
 ```
 
 The registry is a flat Basic tier resource with no soft delete retention configured, so deletion is clean with no lingering soft deleted state to track.
