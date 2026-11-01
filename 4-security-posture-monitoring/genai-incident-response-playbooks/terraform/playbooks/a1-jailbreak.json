@@ -1,0 +1,331 @@
+{
+ "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+ "contentVersion": "1.0.0.0",
+ "parameters": {
+  "workflowName": {
+   "type": "string"
+  },
+  "location": {
+   "type": "string"
+  }
+ },
+ "variables": {
+  "connName": "[concat('azuresentinel-', parameters('workflowName'))]"
+ },
+ "resources": [
+  {
+   "type": "Microsoft.Web/connections",
+   "apiVersion": "2016-06-01",
+   "name": "[variables('connName')]",
+   "location": "[parameters('location')]",
+   "kind": "V1",
+   "properties": {
+    "displayName": "[variables('connName')]",
+    "customParameterValues": {},
+    "parameterValueType": "Alternative",
+    "api": {
+     "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]"
+    }
+   }
+  },
+  {
+   "type": "Microsoft.Logic/workflows",
+   "apiVersion": "2019-05-01",
+   "name": "[parameters('workflowName')]",
+   "location": "[parameters('location')]",
+   "identity": {
+    "type": "SystemAssigned"
+   },
+   "dependsOn": [
+    "[resourceId('Microsoft.Web/connections', variables('connName'))]"
+   ],
+   "tags": {
+    "hidden-SentinelTemplateName": "[parameters('workflowName')]",
+    "framework": "GenAI-IRF"
+   },
+   "properties": {
+    "state": "Enabled",
+    "definition": {
+     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+     "contentVersion": "1.0.0.0",
+     "parameters": {
+      "$connections": {
+       "defaultValue": {},
+       "type": "Object"
+      }
+     },
+     "triggers": {
+      "Microsoft_Sentinel_incident": {
+       "type": "ApiConnectionWebhook",
+       "inputs": {
+        "body": {
+         "callback_url": "@{listCallbackUrl()}"
+        },
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "path": "/incident-creation"
+       }
+      }
+     },
+     "actions": {
+      "D1_Acknowledge_incident": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "put",
+        "path": "/Incidents",
+        "body": {
+         "incidentArmId": "@triggerBody()?['object']?['id']",
+         "status": "Active",
+         "tagsToAdd": {
+          "TagsToAdd": [
+           {
+            "Tag": "GenAI-IRF-A1"
+           },
+           {
+            "Tag": "D1-Acknowledged"
+           }
+          ]
+         }
+        }
+       },
+       "runAfter": {}
+      },
+      "D2_Get_accounts": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "post",
+        "path": "/entities/account",
+        "body": "@triggerBody()?['object']?['properties']?['relatedEntities']"
+       },
+       "runAfter": {
+        "D1_Acknowledge_incident": [
+         "Succeeded"
+        ]
+       }
+      },
+      "D2_Record_evidence": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "post",
+        "path": "/Incidents/Comment",
+        "body": {
+         "incidentArmId": "@triggerBody()?['object']?['id']",
+         "message": "<p><b>GenAI-IRF A1 D2 Confirm incident and collect evidence</b></p><p>Alert: @{triggerBody()?['object']?['properties']?['title']}</p><p>Affected accounts (EndUserId from UserSecurityContext): @{body('D2_Get_accounts')?['Accounts']}</p><p>Primary evidence: the prompt snippet attached to the Defender for AI alert (AIPromptEvidence) and AzureDiagnostics RequestResponse records for the deployment.</p>"
+        }
+       },
+       "runAfter": {
+        "D2_Get_accounts": [
+         "Succeeded"
+        ]
+       }
+      },
+      "D8_Severity_decision_gate": {
+       "type": "If",
+       "runAfter": {
+        "D2_Record_evidence": [
+         "Succeeded"
+        ]
+       },
+       "expression": {
+        "and": [
+         {
+          "contains": [
+           "@triggerBody()?['object']?['properties']?['title']",
+           "detected"
+          ]
+         }
+        ]
+       },
+       "actions": {
+        "D8_Assign_High": {
+         "type": "ApiConnection",
+         "inputs": {
+          "host": {
+           "connection": {
+            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+           }
+          },
+          "method": "put",
+          "path": "/Incidents",
+          "body": {
+           "incidentArmId": "@triggerBody()?['object']?['id']",
+           "severity": "High",
+           "tagsToAdd": {
+            "TagsToAdd": [
+             {
+              "Tag": "D8-Severity-High"
+             },
+             {
+              "Tag": "Guardrail-Bypassed"
+             }
+            ]
+           }
+          }
+         }
+        }
+       },
+       "else": {
+        "actions": {
+         "D8_Assign_Medium": {
+          "type": "ApiConnection",
+          "inputs": {
+           "host": {
+            "connection": {
+             "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+            }
+           },
+           "method": "put",
+           "path": "/Incidents",
+           "body": {
+            "incidentArmId": "@triggerBody()?['object']?['id']",
+            "severity": "Medium",
+            "tagsToAdd": {
+             "TagsToAdd": [
+              {
+               "Tag": "D8-Severity-Medium"
+              },
+              {
+               "Tag": "Guardrail-Held"
+              }
+             ]
+            }
+           }
+          }
+         }
+        }
+       }
+      },
+      "C2_For_each_account": {
+       "type": "Foreach",
+       "foreach": "@body('D2_Get_accounts')?['Accounts']",
+       "runAfter": {
+        "D8_Severity_decision_gate": [
+         "Succeeded"
+        ]
+       },
+       "actions": {
+        "C2_Revoke_sessions": {
+         "type": "Http",
+         "inputs": {
+          "method": "POST",
+          "uri": "https://graph.microsoft.com/v1.0/users/@{items('C2_For_each_account')?['AadUserId']}/revokeSignInSessions",
+          "authentication": {
+           "type": "ManagedServiceIdentity",
+           "audience": "https://graph.microsoft.com"
+          }
+         }
+        },
+        "C2_Account_vs_session_gate": {
+         "type": "If",
+         "runAfter": {
+          "C2_Revoke_sessions": [
+           "Succeeded"
+          ]
+         },
+         "expression": {
+          "and": [
+           {
+            "contains": [
+             "@triggerBody()?['object']?['properties']?['title']",
+             "detected"
+            ]
+           }
+          ]
+         },
+         "actions": {
+          "C2_Disable_account": {
+           "type": "Http",
+           "inputs": {
+            "method": "PATCH",
+            "uri": "https://graph.microsoft.com/v1.0/users/@{items('C2_For_each_account')?['AadUserId']}",
+            "authentication": {
+             "type": "ManagedServiceIdentity",
+             "audience": "https://graph.microsoft.com"
+            },
+            "body": {
+             "accountEnabled": false
+            },
+            "headers": {
+             "Content-Type": "application/json"
+            }
+           }
+          }
+         },
+         "else": {
+          "actions": {}
+         }
+        }
+       }
+      },
+      "C2_Record_containment": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "post",
+        "path": "/Incidents/Comment",
+        "body": {
+         "incidentArmId": "@triggerBody()?['object']?['id']",
+         "message": "<p><b>GenAI-IRF A1 C2 Execute initial containment</b></p><p>Sessions revoked for every account on the incident. Account disabled only when the jailbreak bypassed the guardrail (Account vs Session Termination decision gate).</p><p>Human owned steps (D3 declare, D9 reporting obligations, C3 preserve evidence, C4 emergency filter approval) are on the incident task list.</p>"
+        }
+       },
+       "runAfter": {
+        "C2_For_each_account": [
+         "Succeeded"
+        ]
+       }
+      }
+     },
+     "outputs": {}
+    },
+    "parameters": {
+     "$connections": {
+      "value": {
+       "azuresentinel": {
+        "connectionId": "[resourceId('Microsoft.Web/connections', variables('connName'))]",
+        "connectionName": "[variables('connName')]",
+        "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]",
+        "connectionProperties": {
+         "authentication": {
+          "type": "ManagedServiceIdentity"
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ ],
+ "outputs": {
+  "principalId": {
+   "type": "string",
+   "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+  },
+  "workflowId": {
+   "type": "string",
+   "value": "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+  }
+ }
+}

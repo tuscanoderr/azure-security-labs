@@ -1,0 +1,280 @@
+{
+ "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+ "contentVersion": "1.0.0.0",
+ "parameters": {
+  "workflowName": {
+   "type": "string"
+  },
+  "location": {
+   "type": "string"
+  },
+  "aoaiId": {
+   "type": "string"
+  },
+  "deploymentName": {
+   "type": "string"
+  }
+ },
+ "variables": {
+  "connName": "[concat('azuresentinel-', parameters('workflowName'))]"
+ },
+ "resources": [
+  {
+   "type": "Microsoft.Web/connections",
+   "apiVersion": "2016-06-01",
+   "name": "[variables('connName')]",
+   "location": "[parameters('location')]",
+   "kind": "V1",
+   "properties": {
+    "displayName": "[variables('connName')]",
+    "customParameterValues": {},
+    "parameterValueType": "Alternative",
+    "api": {
+     "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]"
+    }
+   }
+  },
+  {
+   "type": "Microsoft.Logic/workflows",
+   "apiVersion": "2019-05-01",
+   "name": "[parameters('workflowName')]",
+   "location": "[parameters('location')]",
+   "identity": {
+    "type": "SystemAssigned"
+   },
+   "dependsOn": [
+    "[resourceId('Microsoft.Web/connections', variables('connName'))]"
+   ],
+   "tags": {
+    "hidden-SentinelTemplateName": "[parameters('workflowName')]",
+    "framework": "GenAI-IRF"
+   },
+   "properties": {
+    "state": "Enabled",
+    "definition": {
+     "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+     "contentVersion": "1.0.0.0",
+     "parameters": {
+      "$connections": {
+       "defaultValue": {},
+       "type": "Object"
+      },
+      "aoaiId": {
+       "type": "String"
+      },
+      "deploymentName": {
+       "type": "String"
+      }
+     },
+     "triggers": {
+      "Microsoft_Sentinel_incident": {
+       "type": "ApiConnectionWebhook",
+       "inputs": {
+        "body": {
+         "callback_url": "@{listCallbackUrl()}"
+        },
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "path": "/incident-creation"
+       }
+      }
+     },
+     "actions": {
+      "D1_Acknowledge_incident": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "put",
+        "path": "/Incidents",
+        "body": {
+         "incidentArmId": "@triggerBody()?['object']?['id']",
+         "status": "Active",
+         "severity": "High",
+         "tagsToAdd": {
+          "TagsToAdd": [
+           {
+            "Tag": "GenAI-IRF-A6"
+           },
+           {
+            "Tag": "D1-Acknowledged"
+           }
+          ]
+         }
+        }
+       },
+       "runAfter": {}
+      },
+      "D3_Get_attack_source": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "post",
+        "path": "/entities/ip",
+        "body": "@triggerBody()?['object']?['properties']?['relatedEntities']"
+       },
+       "runAfter": {
+        "D1_Acknowledge_incident": [
+         "Succeeded"
+        ]
+       }
+      },
+      "C2_Revoke_key1": {
+       "type": "Http",
+       "inputs": {
+        "method": "POST",
+        "uri": "https://management.azure.com@{parameters('aoaiId')}/regenerateKey?api-version=2024-10-01",
+        "authentication": {
+         "type": "ManagedServiceIdentity",
+         "audience": "https://management.azure.com/"
+        },
+        "body": {
+         "keyName": "Key1"
+        },
+        "headers": {
+         "Content-Type": "application/json"
+        }
+       },
+       "runAfter": {
+        "D3_Get_attack_source": [
+         "Succeeded"
+        ]
+       }
+      },
+      "C2_Revoke_key2": {
+       "type": "Http",
+       "inputs": {
+        "method": "POST",
+        "uri": "https://management.azure.com@{parameters('aoaiId')}/regenerateKey?api-version=2024-10-01",
+        "authentication": {
+         "type": "ManagedServiceIdentity",
+         "audience": "https://management.azure.com/"
+        },
+        "body": {
+         "keyName": "Key2"
+        },
+        "headers": {
+         "Content-Type": "application/json"
+        }
+       },
+       "runAfter": {
+        "C2_Revoke_key1": [
+         "Succeeded"
+        ]
+       }
+      },
+      "C4_Get_deployment": {
+       "type": "Http",
+       "inputs": {
+        "method": "GET",
+        "uri": "https://management.azure.com@{parameters('aoaiId')}/deployments/@{parameters('deploymentName')}?api-version=2024-10-01",
+        "authentication": {
+         "type": "ManagedServiceIdentity",
+         "audience": "https://management.azure.com/"
+        }
+       },
+       "runAfter": {
+        "C2_Revoke_key2": [
+         "Succeeded"
+        ]
+       }
+      },
+      "C4_Emergency_cost_freeze": {
+       "type": "Http",
+       "inputs": {
+        "method": "PUT",
+        "uri": "https://management.azure.com@{parameters('aoaiId')}/deployments/@{parameters('deploymentName')}?api-version=2024-10-01",
+        "authentication": {
+         "type": "ManagedServiceIdentity",
+         "audience": "https://management.azure.com/"
+        },
+        "body": {
+         "sku": {
+          "name": "@{body('C4_Get_deployment')?['sku']?['name']}",
+          "capacity": 1
+         },
+         "properties": {
+          "model": "@body('C4_Get_deployment')?['properties']?['model']",
+          "raiPolicyName": "@{body('C4_Get_deployment')?['properties']?['raiPolicyName']}"
+         }
+        },
+        "headers": {
+         "Content-Type": "application/json"
+        }
+       },
+       "runAfter": {
+        "C4_Get_deployment": [
+         "Succeeded"
+        ]
+       }
+      },
+      "C5_Record_containment": {
+       "type": "ApiConnection",
+       "inputs": {
+        "host": {
+         "connection": {
+          "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+         }
+        },
+        "method": "post",
+        "path": "/Incidents/Comment",
+        "body": {
+         "incidentArmId": "@triggerBody()?['object']?['id']",
+         "message": "<p><b>GenAI-IRF A6 Containment</b></p><p>D3 attack source IPs: @{body('D3_Get_attack_source')?['IPs']}</p><p>C2 Revoke compromised API key: Key1 and Key2 regenerated. C4 Emergency cost freeze: deployment @{parameters('deploymentName')} capped at 1K tokens per minute (was @{body('C4_Get_deployment')?['sku']?['capacity']}K).</p><p>Recovery (R1): terraform apply restores the approved capacity once the source is confirmed blocked.</p>"
+        }
+       },
+       "runAfter": {
+        "C4_Emergency_cost_freeze": [
+         "Succeeded"
+        ]
+       }
+      }
+     },
+     "outputs": {}
+    },
+    "parameters": {
+     "$connections": {
+      "value": {
+       "azuresentinel": {
+        "connectionId": "[resourceId('Microsoft.Web/connections', variables('connName'))]",
+        "connectionName": "[variables('connName')]",
+        "id": "[subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'azuresentinel')]",
+        "connectionProperties": {
+         "authentication": {
+          "type": "ManagedServiceIdentity"
+         }
+        }
+       }
+      }
+     },
+     "aoaiId": {
+      "value": "[parameters('aoaiId')]"
+     },
+     "deploymentName": {
+      "value": "[parameters('deploymentName')]"
+     }
+    }
+   }
+  }
+ ],
+ "outputs": {
+  "principalId": {
+   "type": "string",
+   "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('workflowName')), '2019-05-01', 'full').identity.principalId]"
+  },
+  "workflowId": {
+   "type": "string",
+   "value": "[resourceId('Microsoft.Logic/workflows', parameters('workflowName'))]"
+  }
+ }
+}
