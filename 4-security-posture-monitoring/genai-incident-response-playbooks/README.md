@@ -7,7 +7,7 @@
 
 **Domain:** 4 (Security Posture and Monitoring, SC-500)
 **Services:** Azure OpenAI, Prompt Shields, Microsoft Defender for Cloud (Defender for AI services), Microsoft Sentinel, Microsoft Defender XDR, Azure Logic Apps, Microsoft Graph, Terraform
-**Status:** A1 complete, A6 in progress
+**Status:** Complete (A1 and A6)
 
 ---
 
@@ -26,7 +26,7 @@ archetypes that a cloud platform can detect and contain automatically. Each one 
 | Archetype | Folder | Detection in Azure | Status |
 |---|---|---|---|
 | A1 Direct prompt injection and jailbreak | [`a1-jailbreak`](a1-jailbreak) | Defender for AI Prompt Shields alerts | Complete |
-| A6 Denial of service and cost drain | `a6-cost-drain` | Sentinel scheduled rule on Azure OpenAI token metrics | In progress |
+| A6 Denial of service and cost drain | [`a6-cost-drain`](a6-cost-drain) | Sentinel scheduled rule on Azure OpenAI token metrics | Complete |
 | A2 Indirect prompt injection, A3 data leakage, A4 poisoning, A5 plugin abuse | Not built | Need application context (RAG sources, plugins, training data) that a single model endpoint does not have | Out of scope |
 
 ## Shared environment
